@@ -128,8 +128,7 @@ async def run_server():
         await server.serve_forever()
 
 if __name__ == '__main__':
-    asyncio.run(run_server())
-"""
+    asyncio.run(run_server())"""
 
 server_b64 = base64.b64encode(server_source.encode()).decode()
 
