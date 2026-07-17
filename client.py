@@ -1,3 +1,5 @@
+#guys sorry for shit in my code-style, im fine for this :)
+#Honestly, my code is unreadable
 import os
 import sys
 import json
@@ -695,4 +697,3 @@ if __name__ == "__main__":
     threading.Thread(target=sat, args=(lop,), daemon=True).start()
     eml()
     
-#guys sorry for shit in my code-style, im fine for this :)
