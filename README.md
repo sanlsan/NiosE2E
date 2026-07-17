@@ -37,7 +37,7 @@ To start chatting, enter the node's connection details. You can connect using th
 
 > [!CAUTION]
 > ### SECURITY CHECK (MITM PROTECTION)
-> Look at the **E2E Secure Key** on your screen. It consists of four colored circles (`●●●●`).
+> Look at the **E2E Secure Key** on your screen. It consists of four colored words.
 > 
 > **DO NOT TRUST CHECK-ENC:** `/check_enc` is a fast check for connection security, but a MITM attack can send fake results!
 > * **If the colors match** exactly on your screen and your friend's screen: The connection is secure, and no one is listening.
