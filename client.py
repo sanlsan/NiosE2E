@@ -1,6 +1,3 @@
-#guys sorry for shit in my code-style, im fine for this :)
-#Honestly, my code is unreadable
-import os
 import os
 import sys
 import json
@@ -232,6 +229,53 @@ def save_config():
     with open(config_path, "w") as config_file:
         json.dump(app_config, config_file)
 
+def ds_nd():
+    global node_socket, session_id
+    app_config["active"] = False
+    if node_socket:
+        try:
+            node_socket.writer.close()
+        except:
+            pass
+        node_socket = None
+    session_id = None
+    chat_sessions.clear()
+    message_history.clear()
+
+def enc_r(p_id, t_yp, cont):
+    sess = chat_sessions[p_id]
+    tx_k = sess["tx_k"]
+    seq = sess["tx"] + 1
+    tx_k = hkdf_derive(None, tx_k, b"Ratchet")
+    sess["tx_k"] = tx_k
+    sess["tx"] = seq
+    sess["key"] = hkdf_derive(None, min(tx_k, sess["rx_k"]) + max(tx_k, sess["rx_k"]), b"Visual")
+    meta = {"t": t_yp, "s": seq}
+    if t_yp == "file":
+        meta["n"] = cont[0]
+        meta["d"] = cont[1]
+    else:
+        meta["c"] = cont
+    enc_d = encrypt_aead(tx_k, json.dumps(meta).encode())
+    return enc_d, seq
+
+def dec_r(p_id, ciph, seq):
+    sess = chat_sessions[p_id]
+    rx_k = sess["rx_k"]
+    rx_s = sess["rx"]
+    if seq <= rx_s:
+        return None
+    diff = seq - rx_s
+    for _ in range(diff):
+        rx_k = hkdf_derive(None, rx_k, b"Ratchet")
+    plain = decrypt_aead(rx_k, ciph)
+    if plain is not None:
+        sess["prev_key"] = sess["key"]
+        sess["rx_k"] = rx_k
+        sess["rx"] = seq
+        sess["key"] = hkdf_derive(None, min(sess["tx_k"], rx_k) + max(sess["tx_k"], rx_k), b"Visual")
+    return plain
+
 def render_chat_ui():
     if not active_peer:
         return
@@ -241,7 +285,7 @@ def render_chat_ui():
     
     print(f"{color_blue}{color_bold}=== CHAT: {active_peer} ==={color_reset}")
     if wds_s:
-        print(f"       {wds_s}\n")
+        print(f" Key: {wds_s}\n")
     print(f"{color_yellow}Commands: /b (back) | /f <path> | /check_enc{color_reset}\n")
     
     for message in message_history.get(active_peer, []):
@@ -318,19 +362,27 @@ async def listen_socket_loop():
                         shared_secret = my_private_key.exchange(peer_public_key)
                         session_e2e_key = hkdf_derive(None, shared_secret, b"NiosE2E")
                         
-                        chat_sessions[sender_id] = {"status": "secured", "priv": my_private_key, "key": session_e2e_key, "tx": 0, "rx": 0}
+                        tx_k = hkdf_derive(None, session_e2e_key, b"RespToInit")
+                        rx_k = hkdf_derive(None, session_e2e_key, b"InitToResp")
+                        
+                        chat_sessions[sender_id] = {
+                            "status": "secured",
+                            "priv": my_private_key,
+                            "tx_k": tx_k,
+                            "rx_k": rx_k,
+                            "tx": 0,
+                            "rx": 0,
+                            "key": hkdf_derive(None, min(tx_k, rx_k) + max(tx_k, rx_k), b"Visual"),
+                            "prev_key": None
+                        }
                         
                         response_payload = json.dumps({"action": "send", "to": sender_id, "text": f"RESP:{my_public_b64}"})
                         await node_socket.send_packet(response_payload.encode())
                         
-                        wds_s = gt_wd(session_e2e_key)
-                        system_msg = f"Chat established. Secure Key: {wds_s}"
-                        add_history_message(sender_id, "System", system_msg)
+                        wds_s = gt_wd(chat_sessions[sender_id]["key"])
                         
                         if active_peer == sender_id and current_ui == "chat":
                             render_chat_ui()
-                            sys.stdout.write(f"\r\033[K{color_yellow}[System]: Chat secured. Key generated.{color_reset}\n> ")
-                            sys.stdout.flush()
                         elif current_ui != "main":
                             sys.stdout.write(f"\r\033[K{color_green}[+] Secure Chat established with {sender_id}{color_reset}\n> ")
                             sys.stdout.flush()
@@ -344,74 +396,67 @@ async def listen_socket_loop():
                             shared_secret = my_private_key.exchange(peer_public_key)
                             session_e2e_key = hkdf_derive(None, shared_secret, b"NiosE2E")
                             
-                            chat_sessions[sender_id]["key"] = session_e2e_key
+                            tx_k = hkdf_derive(None, session_e2e_key, b"InitToResp")
+                            rx_k = hkdf_derive(None, session_e2e_key, b"RespToInit")
+                            
+                            chat_sessions[sender_id]["tx_k"] = tx_k
+                            chat_sessions[sender_id]["rx_k"] = rx_k
+                            chat_sessions[sender_id]["key"] = hkdf_derive(None, min(tx_k, rx_k) + max(tx_k, rx_k), b"Visual")
+                            chat_sessions[sender_id]["prev_key"] = None
                             chat_sessions[sender_id]["status"] = "secured"
                             chat_sessions[sender_id]["tx"] = 0
                             chat_sessions[sender_id]["rx"] = 0
                             
-                            wds_s = gt_wd(session_e2e_key)
-                            system_msg = f"Chat secured. Secure Key: {wds_s}"
-                            add_history_message(sender_id, "System", system_msg)
+                            wds_s = gt_wd(chat_sessions[sender_id]["key"])
                             
                             if active_peer == sender_id and current_ui == "chat":
                                 render_chat_ui()
-                                sys.stdout.write(f"\r\033[K{color_yellow}[System]: Chat secured. Key generated.{color_reset}\n> ")
-                                sys.stdout.flush()
                             elif current_ui != "main":
                                 sys.stdout.write(f"\r\033[K{color_green}[+] Secure Chat established with {sender_id}{color_reset}\n> ")
                                 sys.stdout.flush()
                                 
                     elif message_text.startswith("MSG:"):
                         parts = message_text.split(":")
-                        if len(parts) == 3 and sender_id in chat_sessions and chat_sessions[sender_id]["status"] == "secured":
+                        if len(parts) == 4 and sender_id in chat_sessions and chat_sessions[sender_id]["status"] == "secured":
                             cipher_payload = base64.b64decode(parts[1]) + base64.b64decode(parts[2])
-                            decrypted_message = decrypt_aead(chat_sessions[sender_id]["key"], cipher_payload)
+                            seq = int(parts[3])
+                            
+                            decrypted_message = dec_r(sender_id, cipher_payload, seq)
                             
                             if not decrypted_message:
                                 sys.stdout.write(f"\r\033[K{color_red}[!] CRITICAL SECURITY ALERT: E2E message decryption failed! Tampering or MITM attack detected! Instantly disconnecting...{color_reset}\n> ")
                                 sys.stdout.flush()
-                                app_config["active"] = False
-                                if node_socket:
-                                    try:
-                                        node_socket.writer.close()
-                                    except:
-                                        pass
+                                ds_nd()
                                 break
                             
                             metadata = json.loads(decrypted_message.decode())
-                            sequence = metadata.get("s", 0)
-                            if sequence <= chat_sessions[sender_id].get("rx", 0):
-                                continue
-                            chat_sessions[sender_id]["rx"] = sequence
-                            
                             content_type = metadata.get("t")
                             
                             if content_type == "cmd":
                                 command_ctx = metadata["c"]
                                 if command_ctx.startswith("CHK:"):
                                     peer_hash = command_ctx[4:]
-                                    my_hash = base64.b64encode(hashlib.sha256(chat_sessions[sender_id]["key"]).digest()[:4]).decode()
+                                    chk_k = chat_sessions[sender_id].get("prev_key") or chat_sessions[sender_id]["key"]
+                                    my_hash = base64.b64encode(hashlib.sha256(chk_k).digest()[:4]).decode()
                                     verification_result = "OK" if peer_hash == my_hash else "ERR"
                                     send_internal_cmd(sender_id, verification_result)
+                                    if active_peer == sender_id and current_ui == "chat":
+                                        render_chat_ui()
                                     
                                 elif command_ctx in ["OK", "ERR"]:
                                     alert_text = "[+] Auto-check OK! Compare words manually." if command_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
                                     alert_color = color_green if command_ctx == "OK" else color_red
+                                    add_history_message(sender_id, "System", alert_text)
                                     
                                     if command_ctx == "ERR":
-                                        sys.stdout.write(f"\r\033[K{color_red}[!] CRITICAL: Key mismatch! MITM Attack active on channel! Disconnecting...{color_reset}\n> ")
+                                        render_chat_ui()
+                                        sys.stdout.write(f"\n{color_red}[!] CRITICAL: Key mismatch! MITM Attack active on channel! Disconnecting...{color_reset}\n")
                                         sys.stdout.flush()
-                                        app_config["active"] = False
-                                        if node_socket:
-                                            try:
-                                                node_socket.writer.close()
-                                            except:
-                                                pass
+                                        ds_nd()
                                         break
                                         
                                     if active_peer == sender_id and current_ui == "chat":
-                                        sys.stdout.write(f"\r\033[K{alert_color}[System]: {alert_text}{color_reset}\n> ")
-                                        sys.stdout.flush()
+                                        render_chat_ui()
                                 continue
                                 
                             elif content_type == "file":
@@ -429,11 +474,7 @@ async def listen_socket_loop():
                             add_history_message(sender_id, sender_id, content_str, is_file_flag)
                             
                             if active_peer == sender_id and current_ui == "chat":
-                                if is_file_flag:
-                                    sys.stdout.write(f"\r\033[K{color_cyan}[Opponent]:{color_reset} {color_yellow}[FILE: {content_str}]{color_reset}\n> ")
-                                else:
-                                    sys.stdout.write(f"\r\033[K{color_cyan}[Opponent]:{color_reset} {content_str}\n> ")
-                                sys.stdout.flush()
+                                render_chat_ui()
                             else:
                                 sys.stdout.write(f"\r\033[K{color_yellow}[!] New message from {sender_id}{color_reset}\n> ")
                                 sys.stdout.flush()
@@ -465,30 +506,24 @@ def send_internal_cmd(peer_id, cmd_text):
     if peer_id not in chat_sessions or chat_sessions[peer_id]["status"] != "secured" or not node_socket:
         return
         
-    sequence = chat_sessions[peer_id].get("tx", 0) + 1
-    chat_sessions[peer_id]["tx"] = sequence
-    data_payload = json.dumps({"t": "cmd", "c": cmd_text, "s": sequence}).encode()
-    encrypted_bytes = encrypt_aead(chat_sessions[peer_id]["key"], data_payload)
-    nonce_base64 = base64.b64encode(encrypted_bytes[:12]).decode()
-    cipher_base64 = base64.b64encode(encrypted_bytes[12:]).decode()
+    enc_b, seq = enc_r(peer_id, "cmd", cmd_text)
+    nonce_base64 = base64.b64encode(enc_b[:12]).decode()
+    cipher_base64 = base64.b64encode(enc_b[12:]).decode()
     
-    payload = json.dumps({"action": "send", "to": peer_id, "text": f"MSG:{nonce_base64}:{cipher_base64}"}).encode()
+    payload = json.dumps({"action": "send", "to": peer_id, "text": f"MSG:{nonce_base64}:{cipher_base64}:{seq}"}).encode()
     asyncio.run_coroutine_threadsafe(node_socket.send_packet(payload), event_loop)
 
 def send_text_msg(peer_id, text_content):
     if peer_id not in chat_sessions or chat_sessions[peer_id]["status"] != "secured" or not node_socket:
         return
         
-    sequence = chat_sessions[peer_id].get("tx", 0) + 1
-    chat_sessions[peer_id]["tx"] = sequence
-    data_payload = json.dumps({"t": "txt", "c": text_content, "s": sequence}).encode()
-    encrypted_bytes = encrypt_aead(chat_sessions[peer_id]["key"], data_payload)
-    nonce_base64 = base64.b64encode(encrypted_bytes[:12]).decode()
-    cipher_base64 = base64.b64encode(encrypted_bytes[12:]).decode()
+    enc_b, seq = enc_r(peer_id, "txt", text_content)
+    nonce_base64 = base64.b64encode(enc_b[:12]).decode()
+    cipher_base64 = base64.b64encode(enc_b[12:]).decode()
     
     add_history_message(peer_id, session_id, text_content, False)
     
-    payload = json.dumps({"action": "send", "to": peer_id, "text": f"MSG:{nonce_base64}:{cipher_base64}"}).encode()
+    payload = json.dumps({"action": "send", "to": peer_id, "text": f"MSG:{nonce_base64}:{cipher_base64}:{seq}"}).encode()
     asyncio.run_coroutine_threadsafe(node_socket.send_packet(payload), event_loop)
 
 def send_file_attachment(peer_id, file_path):
@@ -499,16 +534,13 @@ def send_file_attachment(peer_id, file_path):
     with open(file_path, "rb") as file_handler:
         file_b64 = base64.b64encode(file_handler.read()).decode()
         
-    sequence = chat_sessions[peer_id].get("tx", 0) + 1
-    chat_sessions[peer_id]["tx"] = sequence
-    data_payload = json.dumps({"t": "file", "n": file_name, "d": f"b64,{file_b64}", "s": sequence}).encode()
-    encrypted_bytes = encrypt_aead(chat_sessions[peer_id]["key"], data_payload)
-    nonce_base64 = base64.b64encode(encrypted_bytes[:12]).decode()
-    cipher_base64 = base64.b64encode(encrypted_bytes[12:]).decode()
+    enc_b, seq = enc_r(peer_id, "file", (file_name, f"b64,{file_b64}"))
+    nonce_base64 = base64.b64encode(enc_b[:12]).decode()
+    cipher_base64 = base64.b64encode(enc_b[12:]).decode()
     
     add_history_message(peer_id, session_id, file_name, True)
     
-    payload = json.dumps({"action": "send", "to": peer_id, "text": f"MSG:{nonce_base64}:{cipher_base64}"}).encode()
+    payload = json.dumps({"action": "send", "to": peer_id, "text": f"MSG:{nonce_base64}:{cipher_base64}:{seq}"}).encode()
     asyncio.run_coroutine_threadsafe(node_socket.send_packet(payload), event_loop)
 
 def create_own_node():
@@ -574,26 +606,23 @@ def handle_chat_input():
         return
         
     if user_input == "/check_enc":
-        sys.stdout.write(f"\033[1A\033[K{color_yellow}[System]:{color_reset} [*] Initiating auto-check...\n> ")
-        sys.stdout.flush()
+        add_history_message(active_peer, "System", "[*] Initiating auto-check...")
+        render_chat_ui()
         my_hash = base64.b64encode(hashlib.sha256(chat_sessions[active_peer]["key"]).digest()[:4]).decode()
         send_internal_cmd(active_peer, f"CHK:{my_hash}")
         
     elif user_input.startswith("/f ") or user_input.startswith("/file "):
         file_path = user_input.split(" ", 1)[1].strip()
         if os.path.exists(file_path):
-            file_name = os.path.basename(file_path)
-            sys.stdout.write(f"\033[1A\033[K{color_green}[You]:{color_reset} {color_yellow}[FILE: {file_name}]{color_reset}\n> ")
-            sys.stdout.flush()
             send_file_attachment(active_peer, file_path)
+            render_chat_ui()
         else:
             sys.stdout.write(f"\033[1A\033[K{color_red}[System]: File not found.{color_reset}\n> ")
             sys.stdout.flush()
             
     else:
-        sys.stdout.write(f"\033[1A\033[K{color_green}[You]:{color_reset} {user_input}\n> ")
-        sys.stdout.flush()
         send_text_msg(active_peer, user_input)
+        render_chat_ui()
 
 def execute_main_loop():
     global active_peer, session_id, current_ui
@@ -615,6 +644,12 @@ def execute_main_loop():
         
         if menu_choice == "1":
             clear_screen()
+            print(f"{color_red}{color_bold}=== SECURITY WARNING ==={color_reset}")
+            print("Intermediate nodes route your E2E traffic. They can see:")
+            print(" - Your IP address and the IP of your peer")
+            print(" - Exact timestamps and sizes of all messages")
+            print(f"{color_yellow}CRITICAL: Only connect to trusted nodes or deploy your own!{color_reset}\n")
+            
             if app_config.get("host"):
                 print(f"Saved Node: {app_config['host']}:{app_config['port']}")
                 if input("Use saved node? (y/n): ").strip().lower() != 'y':
@@ -639,7 +674,7 @@ def execute_main_loop():
                 
             if not session_id:
                 print(f"{color_red}Connection failed.{color_reset}")
-                app_config["active"] = False
+                ds_nd()
                 time.sleep(2.0)
                 continue
                 
@@ -723,14 +758,12 @@ def execute_main_loop():
                             input("Press Enter to return...")
                             
                 elif session_choice == "4":
-                    app_config["active"] = False
-                    session_id = None
-                    chat_sessions.clear()
-                    message_history.clear()
+                    ds_nd()
                     
         elif menu_choice == "2":
             create_own_node()
         elif menu_choice == "3":
+            ds_nd()
             sys.exit(0)
 
 def start_async_thread(loop_instance):
