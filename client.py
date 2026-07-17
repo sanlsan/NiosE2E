@@ -1,6 +1,7 @@
 #guys sorry for shit in my code-style, im fine for this :)
 #Honestly, my code is unreadable
 import os
+import os
 import sys
 import json
 import time
@@ -32,7 +33,7 @@ color_white = "\033[97m"
 color_bold = "\033[1m"
 color_reset = "\033[0m"
 
-colors_list = [color_red, color_green, color_yellow, color_blue, color_magenta, color_cyan, color_white]
+cl_ls = [color_red, color_green, color_yellow, color_blue, color_magenta, color_cyan, color_white]
 
 server_source = """import asyncio, os, base64, json, secrets
 from cryptography.hazmat.primitives.asymmetric import x25519
@@ -146,12 +147,25 @@ def decrypt_aead(encryption_key, cipher_payload):
     except:
         return None
 
-def get_secure_dots(key_bytes):
-    if not key_bytes:
+def gt_wd(k_byt):
+    if not k_byt:
         return ""
-    digest_bytes = hashlib.sha256(key_bytes).digest()
-    dot_elements = [f"{colors_list[digest_bytes[index] % len(colors_list)]}●{color_reset}" for index in range(4)]
-    return " ".join(dot_elements)
+    dg_by = hashlib.sha256(k_byt).digest()
+    w_lst = [
+        "acid", "apex", "band", "bark", "beta", "bolt", "born", "calm", "clay", "coal",
+        "dark", "dawn", "echo", "edge", "envy", "fade", "film", "flow", "flux", "glow",
+        "grid", "hawk", "haze", "hint", "icon", "iron", "jade", "jolt", "kept", "lava",
+        "leaf", "limo", "maze", "mist", "neon", "node", "opal", "open", "path", "pave",
+        "rift", "rust", "sand", "silk", "spark", "tide", "toad", "volt", "wave", "zinc"
+    ]
+    el_ms = []
+    for idx in range(4):
+        w_idx = dg_by[idx * 2] % 50
+        c_idx = dg_by[idx * 2 + 1] % len(cl_ls)
+        word = w_lst[w_idx]
+        colr = cl_ls[c_idx]
+        el_ms.append(f"{colr}{word}{color_reset}")
+    return " | ".join(el_ms)
 
 class ClientSocket:
     def __init__(self, reader, writer, access_key):
@@ -223,11 +237,11 @@ def render_chat_ui():
         return
         
     clear_screen()
-    dots_str = get_secure_dots(chat_sessions[active_peer]["key"]) if active_peer in chat_sessions and chat_sessions[active_peer]["status"] == "secured" else ""
+    wds_s = gt_wd(chat_sessions[active_peer]["key"]) if active_peer in chat_sessions and chat_sessions[active_peer]["status"] == "secured" else ""
     
     print(f"{color_blue}{color_bold}=== CHAT: {active_peer} ==={color_reset}")
-    if dots_str:
-        print(f"       {dots_str}\n")
+    if wds_s:
+        print(f"       {wds_s}\n")
     print(f"{color_yellow}Commands: /b (back) | /f <path> | /check_enc{color_reset}\n")
     
     for message in message_history.get(active_peer, []):
@@ -309,8 +323,8 @@ async def listen_socket_loop():
                         response_payload = json.dumps({"action": "send", "to": sender_id, "text": f"RESP:{my_public_b64}"})
                         await node_socket.send_packet(response_payload.encode())
                         
-                        dots_str = get_secure_dots(session_e2e_key)
-                        system_msg = f"Chat established. Secure Key: {dots_str}"
+                        wds_s = gt_wd(session_e2e_key)
+                        system_msg = f"Chat established. Secure Key: {wds_s}"
                         add_history_message(sender_id, "System", system_msg)
                         
                         if active_peer == sender_id and current_ui == "chat":
@@ -335,8 +349,8 @@ async def listen_socket_loop():
                             chat_sessions[sender_id]["tx"] = 0
                             chat_sessions[sender_id]["rx"] = 0
                             
-                            dots_str = get_secure_dots(session_e2e_key)
-                            system_msg = f"Chat secured. Secure Key: {dots_str}"
+                            wds_s = gt_wd(session_e2e_key)
+                            system_msg = f"Chat secured. Secure Key: {wds_s}"
                             add_history_message(sender_id, "System", system_msg)
                             
                             if active_peer == sender_id and current_ui == "chat":
@@ -381,7 +395,7 @@ async def listen_socket_loop():
                                     send_internal_cmd(sender_id, verification_result)
                                     
                                 elif command_ctx in ["OK", "ERR"]:
-                                    alert_text = "[+] Auto-check OK! Compare dots manually." if command_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
+                                    alert_text = "[+] Auto-check OK! Compare words manually." if command_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
                                     alert_color = color_green if command_ctx == "OK" else color_red
                                     
                                     if command_ctx == "ERR":
@@ -703,9 +717,9 @@ def execute_main_loop():
                             chosen_peer = secured_chats[int(selection)]
                             clear_screen()
                             print(f"{color_blue}--- Verify Encryption: {chosen_peer} ---{color_reset}\n")
-                            print(f"       {get_secure_dots(chat_sessions[chosen_peer]['key'])}\n")
-                            print("Both peers must see the exact same colors in the exact same order.")
-                            print("If colors differ, your connection is compromised (MITM).\n")
+                            print(f"       {gt_wd(chat_sessions[chosen_peer]['key'])}\n")
+                            print("Both peers must see the exact same words and colors in the exact same order.")
+                            print("If they differ, your connection is compromised (MITM).\n")
                             input("Press Enter to return...")
                             
                 elif session_choice == "4":
