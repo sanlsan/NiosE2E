@@ -6,6 +6,7 @@ Welcome to **NiosE2E**, a secure, decentralized, encrypted messenger where you c
 NiosE2E is not just a ready-made application — it is a base layer. The core architecture handles all the heavy lifting: secure connections, 
 cryptographic key exchanges, and node routing. From this point on, the project is completely community-driven: /
 anyone can fork it, design custom user interfaces, create bots, or extend the protocol while relying on a verified secure baseline.
+
 ---
 
 ### Step 1: Download the Client
