@@ -28,7 +28,7 @@ To start chatting, enter the node's connection details. You can connect using th
 | :--- | :--- |
 | **IP Address** | `38.87.116.2` |
 | **Port** | `7234` *(Default port)* |
-| **Access Key** | `F1yV6Fred3uJtRoNSejek/EPr+QYD/9uF0ngexR+Izs=` |
+| **Access Key** | `1CJPY6Pv9k7XgJUHCe7xkAp3zU5NuowWMHb2lrHFIDg=` |
 
 #### 💬 How to Start Messaging:
 1. **Copy Your ID:** Once connected, copy your unique ID from the interface.
