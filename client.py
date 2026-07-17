@@ -361,7 +361,7 @@ async def lis():
                                         sic(snd, vrs)
                                         
                                     elif ctx in ["OK", "ERR"]:
-                                        alt = "[+] Auto-check OK! Compare dots manually." if ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
+                                        alt = "[+] Auto-check OK! Compare dots manually. (/check_enc is fast check for connection's secure, but MITM can send fake results!)" if ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
                                         alc = cgr if ctx == "OK" else cre
                                         if apr == snd and cui == "chat":
                                             sys.stdout.write(f"\r\033[K{alc}[System]: {alt}{crs}\n> ")
