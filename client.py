@@ -482,7 +482,7 @@ def show_ui():
     print(f"{clryllw}Commands: /b (back) | /f <path> | /verify | /check_enc{clr_rst}\n")
     
     if actpeer in chats_s and chats_s[actpeer]["stat_us"] == "compromised":
-        print(f"{clr_red}{clrbold}🚨 ВНИМАНИЕ: Ключ безопасности вашего собеседника изменился! Это может быть атака перехвата (MITM). Отправка сообщений заблокирована. Сверьте цветные слова заново!{clr_rst}\n")
+        print(f"{clr_red}{clrbold}Peer's security key has changed! Active Man-in-the-Middle attack suspected. Transmission blocked. Re-verify the visual words!{clr_rst}\n")
     
     for msg_obj in msghist.get(actpeer, []):
         snd_val = msg_obj["from"]
@@ -584,7 +584,7 @@ async def socklop():
                             pub_ed_b64 = base64.b64encode(pub_ed_byts).decode()
                             if send_id in verified_peers:
                                 if verified_peers[send_id] != pub_ed_b64:
-                                    sys.stdout.write(f"\r\033[K\n{clr_red}{clrbold}[!!!] ВНИМАНИЕ: Ключ безопасности вашего собеседника изменился! Это может быть атака перехвата (MITM). Отправка сообщений заблокирована. Сверьте цветные слова заново!{clr_rst}\n> ")
+                                    sys.stdout.write(f"\r\033[K\n{clr_red}{clrbold}[!!!] WARNING: Your peer's security key has changed! Active MITM attack suspected. Transmission blocked. Re-verify visual words!{clr_rst}\n> ")
                                     sys.stdout.flush()
                                     chats_s[send_id] = {
                                         "stat_us": "compromised",
@@ -656,7 +656,7 @@ async def socklop():
                                 pub_ed_b64 = base64.b64encode(pub_ed_byts).decode()
                                 if send_id in verified_peers:
                                     if verified_peers[send_id] != pub_ed_b64:
-                                        sys.stdout.write(f"\r\033[K\n{clr_red}{clrbold}[!!!] ВНИМАНИЕ: Ключ безопасности вашего собеседника изменился! Это может быть атака перехвата (MITM). Отправка сообщений заблокирована. Сверьте цветные слова заново!{clr_rst}\n> ")
+                                        sys.stdout.write(f"\r\033[K\n{clr_red}{clrbold}[!!!] WARNING: Your peer's security key has changed! Active MITM attack suspected. Transmission blocked. Re-verify visual words!{clr_rst}\n> ")
                                         sys.stdout.flush()
                                         chats_s[send_id] = {
                                             "stat_us": "compromised",
@@ -711,7 +711,7 @@ async def socklop():
                                 dec_msg = decrypt(chats_s[send_id], hdr_b64, cip_pay)
                                 
                                 if not dec_msg:
-                                    sys.stdout.write(f"\r\033[K{clr_red}[!] CRITICAL SECURITY ALERT: E2E message decryption failed! Tampering or MITM attack detected! Instantly disconnecting...{clr_rst}\n> ")
+                                    sys.stdout.write(f"\r\033[K{clr_red}[!] S-Alert: E2E message decryption failed! Tampering or MITM attack detected! Instantly disconnecting...{clr_rst}\n> ")
                                     sys.stdout.flush()
                                     disc_nd()
                                     break
@@ -731,12 +731,12 @@ async def socklop():
                                             show_ui()
                                         
                                     elif cmd_ctx in ["OK", "ERR"]:
-                                        alr_txt = "[+] Auto-check OK! WARNING: This check is in-band and can be simulated by an active MITM! Always compare words manually!" if cmd_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
+                                        alr_txt = "[+] Auto-check OK! Important to know: This check is in-band and can be simulated by an active MITM! Always compare words manually!" if cmd_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
                                         addhist(send_id, "System", alr_txt)
                                         
                                         if cmd_ctx == "ERR":
                                             show_ui()
-                                            sys.stdout.write(f"\n{clr_red}[!] CRITICAL: Key mismatch! MITM Attack active on channel! Disconnecting...{clr_rst}\n")
+                                            sys.stdout.write(f"\n{clr_red}[!] Crit*: Key mismatch! MITM Attack active on channel! Disconnecting...{clr_rst}\n")
                                             sys.stdout.flush()
                                             disc_nd()
                                             break
@@ -898,7 +898,7 @@ def inp_hnd():
         return
         
     if actpeer in chats_s and chats_s[actpeer]["stat_us"] == "compromised":
-        sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: ОТПРАВКА БЛОКИРОВАНА. Ключ собеседника изменился! Возможна MITM-атака.{clr_rst}\n> ")
+        sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: transmission declined. Peer's key has changed! Active MITM attack suspected.{clr_rst}\n> ")
         sys.stdout.flush()
         return
         
@@ -910,13 +910,13 @@ def inp_hnd():
         
     if usr_inp in ["/verify", "/approve"]:
         if actpeer in verified_peers:
-            sys.stdout.write(f"\033[1A\033[K{clrgren}[System]: Данный собеседник уже верифицирован.{clr_rst}\n> ")
+            sys.stdout.write(f"\033[1A\033[K{clrgren}[System]: Peer is already verified.{clr_rst}\n> ")
             sys.stdout.flush()
             return
             
         peer_sess = chats_s.get(actpeer)
         if not peer_sess or peer_sess.get("stat_us") != "secured":
-            sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: Невозможно верифицировать незащищенный чат.{clr_rst}\n> ")
+            sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: Cannot verify an unsecured chat.{clr_rst}\n> ")
             sys.stdout.flush()
             return
             
@@ -925,7 +925,7 @@ def inp_hnd():
             verified_peers[actpeer] = peer_static_key
             app_cfg["verified_encrypted"] = encrypt_verified_data(verified_peers)
             savecfg()
-            addhist(actpeer, "System", "Собеседник верифицирован. Все ограничения сняты.")
+            addhist(actpeer, "System", "Peer verified. All restrictions lifted.")
             show_ui()
         return
         
@@ -939,7 +939,7 @@ def inp_hnd():
         
     elif usr_inp.startswith("/f ") or usr_inp.startswith("/file "):
         if actpeer not in verified_peers:
-            sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: Отправка файлов заблокирована в неверифицированных чатах. Введите /verify для подтверждения ключей.{clr_rst}\n> ")
+            sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: File transfer is blocked in unverified chats. Type /verify to confirm keys.{clr_rst}\n> ")
             sys.stdout.flush()
             return
             
@@ -1101,29 +1101,29 @@ def mainlop():
                             clear_screen()
                             print(f"{clrblue}--- Audit: {cho_pee} ---{clr_rst}\n")
                             
-                            print(f"{clryllw}Визуальная сигнатура сессии (Visual Key Words):{clr_rst}")
+                            print(f"{clryllw}Visual Session Signature (Visual Key Words):{clr_rst}")
                             print(f"  {get_wrd(chats_s[cho_pee]['key_val'])}\n")
                             
                             peer_static_hex = base64.b64decode(chats_s[cho_pee]['peer_static_ed']).hex().upper()
                             peer_formatted = " ".join(peer_static_hex[i:i+4] for i in range(0, len(peer_static_hex), 4))
-                            print(f"{clryllw}Статический Ed25519 Fingerprint собеседника:{clr_rst}")
+                            print(f"{clryllw}Peer Static Ed25519 Fingerprint:{clr_rst}")
                             print(f"  {peer_formatted}\n")
                             
                             my_static_hex = my_ed_pub.hex().upper()
                             my_formatted = " ".join(my_static_hex[i:i+4] for i in range(0, len(my_static_hex), 4))
-                            print(f"{clryllw}Ваш собственный статический Ed25519 Fingerprint:{clr_rst}")
+                            print(f"{clryllw}Your Own Static Ed25519 Fingerprint:{clr_rst}")
                             print(f"  {my_formatted}\n")
                             
                             sess_hash = hashlib.sha256(chats_s[cho_pee]['key_val']).digest().hex().upper()
                             sess_formatted = " ".join(sess_hash[i:i+4] for i in range(0, len(sess_hash), 4))
-                            print(f"{clryllw}Хэш текущего сессионного ключа:{clr_rst}")
+                            print(f"{clryllw}Current Session Key Hash:{clr_rst}")
                             print(f"  {sess_formatted}\n")
                             
-                            print(f"{clr_red}ИНСТРУКЦИЯ ДЛЯ ПАРАНОИКОВ:{clr_rst}")
-                            print("1. Сверьте последовательность 4 слов и цветов. Они должны совпадать.")
-                            print("2. Сравните Fingerprint собеседника с его реальным ключом через доверенный канал.")
-                            print("3. Любое несовпадение означает, что сервер или сеть скомпрометированы (MITM).")
-                            print("4. Если все совпадает, напишите команду /verify в чате с собеседником.\n")
+                            print(f"{clr_red}INSTRUCTION FOR PARANOIDS:{clr_rst}")
+                            print("1. Match the sequence of 4 words and colors. They must be identical.")
+                            print("2. Compare the peer's Fingerprint with their actual key via a trusted channel.")
+                            print("3. Any mismatch means the server or network is compromised (MITM).")
+                            print("4. If everything matches, type /verify inside the chat with the peer.\n")
                             input("Press Enter to return...")
                             
                 elif ses_chc == "4":
