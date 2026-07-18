@@ -49,7 +49,7 @@ To start chatting, enter the node's connection details. You can connect using th
 ### Step 4: Host Your Own Private Node
 If you prefer not to use public nodes, you can host your own gateway with full control:
 
-1. In the main menu, select **Option 2**.
+1. In the main menu, select **Option 3**.
 2. The client will instantly generate two deployment scripts in your folder:
    * `deploy_win.bat` *(for Windows)*
    * `deploy_lin.sh` *(for Linux)*
