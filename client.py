@@ -365,6 +365,39 @@ msghist = {}
 curr_ui = "main"
 app_cfg = {"host": None, "port": None, "key": None, "active": False, "anon_mode": False}
 
+my_ed_priv = None
+my_ed_pub = None
+verified_peers = {}
+
+def encrypt_verified_data(data_dict):
+    if not my_ed_priv:
+        return ""
+    try:
+        priv_bytes = my_ed_priv.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        cfg_key = hashlib.sha256(priv_bytes).digest()
+        serialized = json.dumps(data_dict).encode()
+        aes_gcm = AESGCM(cfg_key)
+        nonce = os.urandom(12)
+        ct = aes_gcm.encrypt(nonce, serialized, None)
+        return base64.b64encode(nonce + ct).decode()
+    except:
+        return ""
+
+def decrypt_verified_data(encrypted_str):
+    if not my_ed_priv or not encrypted_str:
+        return {}
+    try:
+        priv_bytes = my_ed_priv.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        cfg_key = hashlib.sha256(priv_bytes).digest()
+        enc_data = base64.b64decode(encrypted_str)
+        nonce = enc_data[:12]
+        ct = enc_data[12:]
+        aes_gcm = AESGCM(cfg_key)
+        decrypted = aes_gcm.decrypt(nonce, ct, None)
+        return json.loads(decrypted.decode())
+    except:
+        return {}
+
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
@@ -409,7 +442,7 @@ def getauth(hst_val, prt_val, is_anon):
     return prv_key, base64.b64encode(pubbyts).decode(), peer_id
 
 def disc_nd():
-    global nod_sck, sess_id
+    global nod_sck, sess_id, my_ed_priv, my_ed_pub, verified_peers
     is_anon = app_cfg.get("anon_mode", False)
     app_cfg["active"] = False
     if nod_sck:
@@ -421,6 +454,9 @@ def disc_nd():
     sess_id = None
     chats_s.clear()
     msghist.clear()
+    my_ed_priv = None
+    my_ed_pub = None
+    verified_peers.clear()
     if "anon_prv" in app_cfg:
         del app_cfg["anon_prv"]
     if is_anon:
@@ -437,10 +473,16 @@ def show_ui():
     clear_screen()
     wrd_str = get_wrd(chats_s[actpeer]["key_val"]) if actpeer in chats_s and chats_s[actpeer]["stat_us"] == "secured" else ""
     
-    print(f"{clrblue}{clrbold}--- CHAT: {actpeer} ---{clr_rst}")
+    is_verified = actpeer in verified_peers
+    status_str = f"{clrgren}[Verified]{clr_rst}" if is_verified else f"{clryllw}[Unverified]{clr_rst}"
+    
+    print(f"{clrblue}{clrbold}--- CHAT: {status_str} {actpeer} ---{clr_rst}")
     if wrd_str:
         print(f" Key: {wrd_str}\n")
-    print(f"{clryllw}Commands: /b (back) | /f <path> | /check_enc{clr_rst}\n")
+    print(f"{clryllw}Commands: /b (back) | /f <path> | /verify | /check_enc{clr_rst}\n")
+    
+    if actpeer in chats_s and chats_s[actpeer]["stat_us"] == "compromised":
+        print(f"{clr_red}{clrbold}🚨 ВНИМАНИЕ: Ключ безопасности вашего собеседника изменился! Это может быть атака перехвата (MITM). Отправка сообщений заблокирована. Сверьте цветные слова заново!{clr_rst}\n")
     
     for msg_obj in msghist.get(actpeer, []):
         snd_val = msg_obj["from"]
@@ -468,7 +510,7 @@ def addhist(peer_id, send_id, content, is_file=False):
     msghist[peer_id].append({"from": send_id, "content": content, "is_file": is_file})
 
 async def socklop():
-    global nod_sck, sess_id, chats_s, msghist
+    global nod_sck, sess_id, chats_s, msghist, my_ed_priv, my_ed_pub, verified_peers
     
     while True:
         if not app_cfg.get("active"):
@@ -487,6 +529,12 @@ async def socklop():
             nod_sck = sck_ses
             
             ed_priv, ed_publ, peer_id = getauth(app_cfg["host"], app_cfg["port"], app_cfg.get("anon_mode", False))
+            my_ed_priv = ed_priv
+            my_ed_pub = base64.b64decode(ed_publ)
+            
+            enc_data = app_cfg.get("verified_encrypted", "")
+            verified_peers = decrypt_verified_data(enc_data)
+            
             await nod_sck.send_packet(json.dumps({"action": "auth", "peer_id": peer_id, "pub": ed_publ}).encode())
             
             chl_pkt = await nod_sck.receive_packet()
@@ -517,55 +565,50 @@ async def socklop():
                     msg_txt = pay_jsn.get("text", "")
                     
                     if msg_txt.startswith("HELO:"):
-                        pubbyts = base64.b64decode(msg_txt.split(":", 1)[1])
-                        pub_key = x25519.X25519PublicKey.from_public_bytes(pubbyts)
-                        prv_key = x25519.X25519PrivateKey.generate()
-                        pubbyts = prv_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-                        pub_b64 = base64.b64encode(pubbyts).decode()
-                        
-                        sh_key1 = prv_key.exchange(pub_key)
-                        rat_key = sh_key1
-                        rat_key, chn_krx = kdfrk_f(rat_key, sh_key1)
-                        dhs_key = x25519.X25519PrivateKey.generate()
-                        dhr_key = base64.b64encode(pubbyts).decode()
-                        rat_key, chn_ksx = kdfrk_f(rat_key, dhs_key.exchange(pub_key))
-                        
-                        chats_s[send_id] = {
-                            "stat_us": "secured",
-                            "dhs_key": dhs_key,
-                            "dhr_key": dhr_key,
-                            "rat_key": rat_key,
-                            "chn_ksx": chn_ksx,
-                            "chn_krx": chn_krx,
-                            "num_snt": 0,
-                            "num_rcv": 0,
-                            "prv_num": 0,
-                            "skip_ks": {},
-                            "key_val": hkdf_dr(None, min(chn_ksx, chn_krx) + max(chn_ksx, chn_krx), b"Visual"),
-                            "prv_key": None
-                        }
-                        
-                        res_pay = json.dumps({"action": "send", "to": send_id, "text": f"RESP:{pub_b64}"})
-                        await nod_sck.send_packet(res_pay.encode())
-                        
-                        if actpeer == send_id and curr_ui == "chat":
-                            show_ui()
-                        elif curr_ui != "main":
-                            sys.stdout.write(f"\r\033[K{clrgren}[+] Secure Chat established with {send_id}{clr_rst}\n> ")
-                            sys.stdout.flush()
+                        parts_l = msg_txt.split(":")
+                        if len(parts_l) >= 4:
+                            pubbyts = base64.b64decode(parts_l[1])
+                            pub_ed_byts = base64.b64decode(parts_l[2])
+                            sig_byts = base64.b64decode(parts_l[3])
                             
-                    elif msg_txt.startswith("RESP:"):
-                        if send_id in chats_s and chats_s[send_id]["stat_us"] == "connecting":
-                            pubbyts = base64.b64decode(msg_txt.split(":", 1)[1])
+                            expected_peer_id = hashlib.sha256(pub_ed_byts).digest()[:8].hex().upper()
+                            if expected_peer_id != send_id:
+                                continue
+                                
+                            try:
+                                peer_ed_pub = ed25519.Ed25519PublicKey.from_public_bytes(pub_ed_byts)
+                                peer_ed_pub.verify(sig_byts, pubbyts)
+                            except:
+                                continue
+                                
+                            pub_ed_b64 = base64.b64encode(pub_ed_byts).decode()
+                            if send_id in verified_peers:
+                                if verified_peers[send_id] != pub_ed_b64:
+                                    sys.stdout.write(f"\r\033[K\n{clr_red}{clrbold}[!!!] ВНИМАНИЕ: Ключ безопасности вашего собеседника изменился! Это может быть атака перехвата (MITM). Отправка сообщений заблокирована. Сверьте цветные слова заново!{clr_rst}\n> ")
+                                    sys.stdout.flush()
+                                    chats_s[send_id] = {
+                                        "stat_us": "compromised",
+                                        "key_val": None
+                                    }
+                                    if actpeer == send_id and curr_ui == "chat":
+                                        show_ui()
+                                    continue
+                            
                             pub_key = x25519.X25519PublicKey.from_public_bytes(pubbyts)
-                            prv_key = chats_s[send_id]["prv_key"]
+                            prv_key = x25519.X25519PrivateKey.generate()
+                            resp_pubbyts = prv_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+                            resp_pub_b64 = base64.b64encode(resp_pubbyts).decode()
+                            
+                            res_sig = my_ed_priv.sign(resp_pubbyts)
+                            resp_ed_b64 = base64.b64encode(my_ed_pub).decode()
+                            resp_sig_b64 = base64.b64encode(res_sig).decode()
                             
                             sh_key1 = prv_key.exchange(pub_key)
                             rat_key = sh_key1
-                            dhs_key = prv_key
+                            rat_key, chn_krx = kdfrk_f(rat_key, sh_key1)
+                            dhs_key = x25519.X25519PrivateKey.generate()
                             dhr_key = base64.b64encode(pubbyts).decode()
-                            rat_key, chn_ksx = kdfrk_f(rat_key, sh_key1)
-                            chn_krx = None
+                            rat_key, chn_ksx = kdfrk_f(rat_key, dhs_key.exchange(pub_key))
                             
                             chats_s[send_id] = {
                                 "stat_us": "secured",
@@ -578,80 +621,151 @@ async def socklop():
                                 "num_rcv": 0,
                                 "prv_num": 0,
                                 "skip_ks": {},
-                                "key_val": hkdf_dr(None, min(chn_ksx, b"") + max(chn_ksx, b""), b"Visual"),
-                                "prv_key": None
+                                "key_val": hkdf_dr(None, min(chn_ksx, chn_krx) + max(chn_ksx, chn_krx), b"Visual"),
+                                "prv_key": None,
+                                "peer_static_ed": pub_ed_b64
                             }
+                            
+                            res_pay = json.dumps({"action": "send", "to": send_id, "text": f"RESP:{resp_pub_b64}:{resp_ed_b64}:{resp_sig_b64}"})
+                            await nod_sck.send_packet(res_pay.encode())
                             
                             if actpeer == send_id and curr_ui == "chat":
                                 show_ui()
                             elif curr_ui != "main":
                                 sys.stdout.write(f"\r\033[K{clrgren}[+] Secure Chat established with {send_id}{clr_rst}\n> ")
                                 sys.stdout.flush()
+                            
+                    elif msg_txt.startswith("RESP:"):
+                        if send_id in chats_s and chats_s[send_id]["stat_us"] == "connecting":
+                            parts_l = msg_txt.split(":")
+                            if len(parts_l) >= 4:
+                                pubbyts = base64.b64decode(parts_l[1])
+                                pub_ed_byts = base64.b64decode(parts_l[2])
+                                sig_byts = base64.b64decode(parts_l[3])
+                                
+                                expected_peer_id = hashlib.sha256(pub_ed_byts).digest()[:8].hex().upper()
+                                if expected_peer_id != send_id:
+                                    continue
+                                    
+                                try:
+                                    peer_ed_pub = ed25519.Ed25519PublicKey.from_public_bytes(pub_ed_byts)
+                                    peer_ed_pub.verify(sig_byts, pubbyts)
+                                except:
+                                    continue
+                                    
+                                pub_ed_b64 = base64.b64encode(pub_ed_byts).decode()
+                                if send_id in verified_peers:
+                                    if verified_peers[send_id] != pub_ed_b64:
+                                        sys.stdout.write(f"\r\033[K\n{clr_red}{clrbold}[!!!] ВНИМАНИЕ: Ключ безопасности вашего собеседника изменился! Это может быть атака перехвата (MITM). Отправка сообщений заблокирована. Сверьте цветные слова заново!{clr_rst}\n> ")
+                                        sys.stdout.flush()
+                                        chats_s[send_id] = {
+                                            "stat_us": "compromised",
+                                            "key_val": None
+                                        }
+                                        if actpeer == send_id and curr_ui == "chat":
+                                            show_ui()
+                                        continue
+                                
+                                pub_key = x25519.X25519PublicKey.from_public_bytes(pubbyts)
+                                prv_key = chats_s[send_id]["prv_key"]
+                                
+                                sh_key1 = prv_key.exchange(pub_key)
+                                rat_key = sh_key1
+                                dhs_key = prv_key
+                                dhr_key = base64.b64encode(pubbyts).decode()
+                                rat_key, chn_ksx = kdfrk_f(rat_key, sh_key1)
+                                chn_krx = None
+                                
+                                chats_s[send_id] = {
+                                    "stat_us": "secured",
+                                    "dhs_key": dhs_key,
+                                    "dhr_key": dhr_key,
+                                    "rat_key": rat_key,
+                                    "chn_ksx": chn_ksx,
+                                    "chn_krx": chn_krx,
+                                    "num_snt": 0,
+                                    "num_rcv": 0,
+                                    "prv_num": 0,
+                                    "skip_ks": {},
+                                    "key_val": hkdf_dr(None, min(chn_ksx, b"") + max(chn_ksx, b""), b"Visual"),
+                                    "prv_key": None,
+                                    "peer_static_ed": pub_ed_b64
+                                }
+                                
+                                if actpeer == send_id and curr_ui == "chat":
+                                    show_ui()
+                                elif curr_ui != "main":
+                                    sys.stdout.write(f"\r\033[K{clrgren}[+] Secure Chat established with {send_id}{clr_rst}\n> ")
+                                    sys.stdout.flush()
                                 
                     elif msg_txt.startswith("MSG:"):
                         parts_l = msg_txt.split(":")
-                        if len(parts_l) == 3 and send_id in chats_s and chats_s[send_id]["stat_us"] == "secured":
-                            hdr_b64 = parts_l[1]
-                            cip_pay = base64.b64decode(parts_l[2])
-                            
-                            dec_msg = decrypt(chats_s[send_id], hdr_b64, cip_pay)
-                            
-                            if not dec_msg:
-                                sys.stdout.write(f"\r\033[K{clr_red}[!] CRITICAL SECURITY ALERT: E2E message decryption failed! Tampering or MITM attack detected! Instantly disconnecting...{clr_rst}\n> ")
-                                sys.stdout.flush()
-                                disc_nd()
-                                break
-                            
-                            metadat = json.loads(dec_msg.decode())
-                            con_typ = metadat.get("t")
-                            
-                            if con_typ == "cmd":
-                                cmd_ctx = metadat["c"]
-                                if cmd_ctx.startswith("CHK:"):
-                                    p_hashx = cmd_ctx[4:]
-                                    chk_key = chats_s[send_id].get("prv_key") or chats_s[send_id]["key_val"]
-                                    m_hashx = base64.b64encode(hashlib.sha256(chk_key).digest()[:4]).decode()
-                                    vrf_res = "OK" if p_hashx == m_hashx else "ERR"
-                                    snd_cmd(send_id, vrf_res)
-                                    if actpeer == send_id and curr_ui == "chat":
-                                        show_ui()
-                                    
-                                elif cmd_ctx in ["OK", "ERR"]:
-                                    alr_txt = "[+] Auto-check OK! WARNING: This check is in-band and can be simulated by an active MITM! Always compare words manually!" if cmd_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
-                                    addhist(send_id, "System", alr_txt)
-                                    
-                                    if cmd_ctx == "ERR":
-                                        show_ui()
-                                        sys.stdout.write(f"\n{clr_red}[!] CRITICAL: Key mismatch! MITM Attack active on channel! Disconnecting...{clr_rst}\n")
-                                        sys.stdout.flush()
-                                        disc_nd()
-                                        break
-                                        
-                                    if actpeer == send_id and curr_ui == "chat":
-                                        show_ui()
+                        if len(parts_l) == 3 and send_id in chats_s:
+                            if chats_s[send_id]["stat_us"] == "compromised":
                                 continue
-                                
-                            elif con_typ == "file":
-                                b64_dat = metadat["d"].split(",")[1]
-                                fil_byt = base64.b64decode(b64_dat)
-                                raw_nam = os.path.basename(metadat["n"].replace('\\', '/'))
-                                saf_nam = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', raw_nam)
-                                tgt_pth = os.path.join(down_dr, saf_nam)
-                                with open(tgt_pth, "wb") as fil_hnd:
-                                    fil_hnd.write(fil_byt)
-                                con_str = f"{saf_nam} (Saved to downloads)"
-                                is_file = True
-                            else:
-                                con_str = metadat["c"]
-                                is_file = False
-                                
-                            addhist(send_id, send_id, con_str, is_file)
                             
-                            if actpeer == send_id and curr_ui == "chat":
-                                show_ui()
-                            else:
-                                sys.stdout.write(f"\r\033[K{clryllw}[!] New message from {send_id}{clr_rst}\n> ")
-                                sys.stdout.flush()
+                            if chats_s[send_id]["stat_us"] == "secured":
+                                hdr_b64 = parts_l[1]
+                                cip_pay = base64.b64decode(parts_l[2])
+                                
+                                dec_msg = decrypt(chats_s[send_id], hdr_b64, cip_pay)
+                                
+                                if not dec_msg:
+                                    sys.stdout.write(f"\r\033[K{clr_red}[!] CRITICAL SECURITY ALERT: E2E message decryption failed! Tampering or MITM attack detected! Instantly disconnecting...{clr_rst}\n> ")
+                                    sys.stdout.flush()
+                                    disc_nd()
+                                    break
+                                
+                                metadat = json.loads(dec_msg.decode())
+                                con_typ = metadat.get("t")
+                                
+                                if con_typ == "cmd":
+                                    cmd_ctx = metadat["c"]
+                                    if cmd_ctx.startswith("CHK:"):
+                                        p_hashx = cmd_ctx[4:]
+                                        chk_key = chats_s[send_id].get("prv_key") or chats_s[send_id]["key_val"]
+                                        m_hashx = base64.b64encode(hashlib.sha256(chk_key).digest()[:4]).decode()
+                                        vrf_res = "OK" if p_hashx == m_hashx else "ERR"
+                                        snd_cmd(send_id, vrf_res)
+                                        if actpeer == send_id and curr_ui == "chat":
+                                            show_ui()
+                                        
+                                    elif cmd_ctx in ["OK", "ERR"]:
+                                        alr_txt = "[+] Auto-check OK! WARNING: This check is in-band and can be simulated by an active MITM! Always compare words manually!" if cmd_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
+                                        addhist(send_id, "System", alr_txt)
+                                        
+                                        if cmd_ctx == "ERR":
+                                            show_ui()
+                                            sys.stdout.write(f"\n{clr_red}[!] CRITICAL: Key mismatch! MITM Attack active on channel! Disconnecting...{clr_rst}\n")
+                                            sys.stdout.flush()
+                                            disc_nd()
+                                            break
+                                            
+                                        if actpeer == send_id and curr_ui == "chat":
+                                            show_ui()
+                                    continue
+                                    
+                                elif con_typ == "file":
+                                    b64_dat = metadat["d"].split(",")[1]
+                                    fil_byt = base64.b64decode(b64_dat)
+                                    raw_nam = os.path.basename(metadat["n"].replace('\\', '/'))
+                                    saf_nam = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', raw_nam)
+                                    tgt_pth = os.path.join(down_dr, saf_nam)
+                                    with open(tgt_pth, "wb") as fil_hnd:
+                                        fil_hnd.write(fil_byt)
+                                    con_str = f"{saf_nam} (Saved to downloads)"
+                                    is_file = True
+                                else:
+                                    con_str = metadat["c"]
+                                    is_file = False
+                                    
+                                addhist(send_id, send_id, con_str, is_file)
+                                
+                                if actpeer == send_id and curr_ui == "chat":
+                                    show_ui()
+                                else:
+                                    sys.stdout.write(f"\r\033[K{clryllw}[!] New message from {send_id}{clr_rst}\n> ")
+                                    sys.stdout.flush()
         except Exception:
             pass
             
@@ -680,7 +794,11 @@ def conn_pr(peer_id):
     pubbyts = eph_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     pub_b64 = base64.b64encode(pubbyts).decode()
     
-    payload = json.dumps({"action": "send", "to": peer_id, "text": f"HELO:{pub_b64}"}).encode()
+    sig_val = my_ed_priv.sign(pubbyts)
+    ed_pub_b64 = base64.b64encode(my_ed_pub).decode()
+    sig_b64 = base64.b64encode(sig_val).decode()
+    
+    payload = json.dumps({"action": "send", "to": peer_id, "text": f"HELO:{pub_b64}:{ed_pub_b64}:{sig_b64}"}).encode()
     asyncio.run_coroutine_threadsafe(nod_sck.send_packet(payload), evt_lop)
 
 def snd_cmd(peer_id, cmd_txt):
@@ -707,6 +825,8 @@ def snd_txt(peer_id, txt_con):
 
 def snd_fil(peer_id, fil_pth):
     if peer_id not in chats_s or chats_s[peer_id]["stat_us"] != "secured" or not nod_sck or not os.path.exists(fil_pth):
+        return
+    if peer_id not in verified_peers:
         return
         
     fil_nam = os.path.basename(fil_pth)
@@ -765,7 +885,7 @@ python3 server.py"""
     input("\nPress Enter to return...")
 
 def inp_hnd():
-    global actpeer
+    global actpeer, verified_peers
     usr_inp = input().strip()
     
     if usr_inp in ["/b", "/back"]:
@@ -777,13 +897,39 @@ def inp_hnd():
         sys.stdout.flush()
         return
         
+    if actpeer in chats_s and chats_s[actpeer]["stat_us"] == "compromised":
+        sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: ОТПРАВКА БЛОКИРОВАНА. Ключ собеседника изменился! Возможна MITM-атака.{clr_rst}\n> ")
+        sys.stdout.flush()
+        return
+        
     pr_stat = chats_s[actpeer]["stat_us"]
     if pr_stat != "secured":
         sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: Connection not secured yet. Please wait.{clr_rst}\n> ")
         sys.stdout.flush()
         return
         
-    if usr_inp == "/check_enc":
+    if usr_inp in ["/verify", "/approve"]:
+        if actpeer in verified_peers:
+            sys.stdout.write(f"\033[1A\033[K{clrgren}[System]: Данный собеседник уже верифицирован.{clr_rst}\n> ")
+            sys.stdout.flush()
+            return
+            
+        peer_sess = chats_s.get(actpeer)
+        if not peer_sess or peer_sess.get("stat_us") != "secured":
+            sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: Невозможно верифицировать незащищенный чат.{clr_rst}\n> ")
+            sys.stdout.flush()
+            return
+            
+        peer_static_key = peer_sess.get("peer_static_ed")
+        if peer_static_key:
+            verified_peers[actpeer] = peer_static_key
+            app_cfg["verified_encrypted"] = encrypt_verified_data(verified_peers)
+            savecfg()
+            addhist(actpeer, "System", "Собеседник верифицирован. Все ограничения сняты.")
+            show_ui()
+        return
+        
+    elif usr_inp == "/check_enc":
         addhist(actpeer, "System", "[*] Initiating auto-check...")
         addhist(actpeer, "System", "WARNING: This auto-check is in-band and can be simulated by an active MITM!")
         addhist(actpeer, "System", "Always manually compare the words below via an out-of-band channel!")
@@ -792,6 +938,11 @@ def inp_hnd():
         snd_cmd(actpeer, f"CHK:{m_hashx}")
         
     elif usr_inp.startswith("/f ") or usr_inp.startswith("/file "):
+        if actpeer not in verified_peers:
+            sys.stdout.write(f"\033[1A\033[K{clr_red}[System]: Отправка файлов заблокирована в неверифицированных чатах. Введите /verify для подтверждения ключей.{clr_rst}\n> ")
+            sys.stdout.flush()
+            return
+            
         fil_pth = usr_inp.split(" ", 1)[1].strip()
         if os.path.exists(fil_pth):
             snd_fil(actpeer, fil_pth)
@@ -805,7 +956,7 @@ def inp_hnd():
         show_ui()
 
 def mainlop():
-    global actpeer, sess_id, curr_ui
+    global actpeer, sess_id, curr_ui, verified_peers
     loadcfg()
     
     while True:
@@ -907,8 +1058,14 @@ def mainlop():
                             print("No active chats.")
                             
                         for idx_val, peer_id in enumerate(ses_key):
+                            is_verified = peer_id in verified_peers
+                            status_lbl = f"{clrgren}[Verified]{clr_rst}" if is_verified else f"{clryllw}[Unverified]{clr_rst}"
+                            
                             pr_stat = "Secured" if chats_s[peer_id]["stat_us"] == "secured" else "Connecting"
-                            print(f"{idx_val}. {peer_id} [{pr_stat}]")
+                            if chats_s[peer_id]["stat_us"] == "compromised":
+                                pr_stat = f"{clr_red}BLOCKED/MITM{clr_rst}"
+                                
+                            print(f"{idx_val}. {peer_id} {status_lbl} [{pr_stat}]")
                             
                         sel_val = input("\nEnter number to open chat, or 'b' to go back: ").strip()
                         if sel_val.lower() == 'b':
@@ -942,11 +1099,31 @@ def mainlop():
                         if sel_val.isdigit() and int(sel_val) < len(sec_cht):
                             cho_pee = sec_cht[int(sel_val)]
                             clear_screen()
-                            print(f"{clrblue}--- Verify Encryption: {cho_pee} ---{clr_rst}\n")
-                            print(f"       {get_wrd(chats_s[cho_pee]['key_val'])}\n")
-                            print("Both peers must see the exact same words and colors in the exact same order.")
-                            print(f"{clr_red}WARNING: Auto-checks (/check_enc) can be faked by a MITM.{clr_rst}")
-                            print("The ONLY 100% secure way is to manually compare these words via voice or in person!\n")
+                            print(f"{clrblue}--- Audit: {cho_pee} ---{clr_rst}\n")
+                            
+                            print(f"{clryllw}Визуальная сигнатура сессии (Visual Key Words):{clr_rst}")
+                            print(f"  {get_wrd(chats_s[cho_pee]['key_val'])}\n")
+                            
+                            peer_static_hex = base64.b64decode(chats_s[cho_pee]['peer_static_ed']).hex().upper()
+                            peer_formatted = " ".join(peer_static_hex[i:i+4] for i in range(0, len(peer_static_hex), 4))
+                            print(f"{clryllw}Статический Ed25519 Fingerprint собеседника:{clr_rst}")
+                            print(f"  {peer_formatted}\n")
+                            
+                            my_static_hex = my_ed_pub.hex().upper()
+                            my_formatted = " ".join(my_static_hex[i:i+4] for i in range(0, len(my_static_hex), 4))
+                            print(f"{clryllw}Ваш собственный статический Ed25519 Fingerprint:{clr_rst}")
+                            print(f"  {my_formatted}\n")
+                            
+                            sess_hash = hashlib.sha256(chats_s[cho_pee]['key_val']).digest().hex().upper()
+                            sess_formatted = " ".join(sess_hash[i:i+4] for i in range(0, len(sess_hash), 4))
+                            print(f"{clryllw}Хэш текущего сессионного ключа:{clr_rst}")
+                            print(f"  {sess_formatted}\n")
+                            
+                            print(f"{clr_red}ИНСТРУКЦИЯ ДЛЯ ПАРАНОИКОВ:{clr_rst}")
+                            print("1. Сверьте последовательность 4 слов и цветов. Они должны совпадать.")
+                            print("2. Сравните Fingerprint собеседника с его реальным ключом через доверенный канал.")
+                            print("3. Любое несовпадение означает, что сервер или сеть скомпрометированы (MITM).")
+                            print("4. Если все совпадает, напишите команду /verify в чате с собеседником.\n")
                             input("Press Enter to return...")
                             
                 elif ses_chc == "4":
