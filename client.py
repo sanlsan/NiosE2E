@@ -157,11 +157,16 @@ def gt_wd(k_byt):
         return ""
     dg_by = hashlib.sha256(k_byt).digest()
     w_lst = [
-        "acid", "apex", "band", "bark", "beta", "bolt", "born", "calm", "clay", "coal",
-        "dark", "dawn", "echo", "edge", "envy", "fade", "film", "flow", "flux", "glow",
-        "grid", "hawk", "haze", "hint", "icon", "iron", "jade", "jolt", "kept", "lava",
-        "leaf", "limo", "maze", "mist", "neon", "node", "opal", "open", "path", "pave",
-        "rift", "rust", "sand", "silk", "spark", "tide", "toad", "volt", "wave", "zinc"
+        "sigma", "chad", "giga", "rizz", "gyatt", "mewing", "skibidi", "ohio", "cringe", "based",
+        "cope", "seethe", "mald", "yeet", "bruh", "pog", "poggers", "sus", "amogus", "stonks",
+        "fomo", "hodl", "doge", "pepe", "wojak", "troll", "noob", "pwned", "rekt", "oof",
+        "skillissue", "gitgud", "chungus", "harambe", "shrek", "sponge", "squidward", "fr", "nocap", "mid",
+        "valid", "sheesh", "bussin", "glazing", "cook", "boomer", "zoomer", "doomer", "coomer", "heisenberg",
+        "walter", "saul", "kek", "lol", "lmao", "rofl", "kappa", "pepega", "monkas", "lurk",
+        "ratio", "canceled", "simp", "incel", "femcel", "goofy", "augh", "npc", "gigachad", "grindset",
+        "alpha", "beta", "omega", "rizzler", "woke", "redpill", "bluepill", "blackpill", "doggo", "unhinged",
+        "delulu", "solulu", "pookie", "bestie", "slay", "ate", "banger", "boujee", "skrt", "cap",
+        "fam", "lit", "fire", "gucci", "salty", "shook", "tea", "shade", "flex", "clout"
     ]
     el_ms = []
     for idx in range(4):
@@ -305,6 +310,7 @@ def render_chat_ui():
     print(f"{color_blue}{color_bold}--- CHAT: {active_peer} ---{color_reset}")
     if wds_s:
         print(f" Key: {wds_s}\n")
+        print(f"{color_yellow}Key changes with per message{color_reset}\n")
     print(f"{color_yellow}Commands: /b (back) | /f <path> | /check_enc{color_reset}\n")
     
     for message in message_history.get(active_peer, []):
