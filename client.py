@@ -305,6 +305,22 @@ message_history = {}
 current_ui = "main"
 app_config = {"host": None, "port": None, "key": None, "active": False}
 
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def load_config():
+    global app_config
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as config_file:
+                app_config = json.load(config_file)
+        except:
+            pass
+
+def save_config():
+    with open(config_path, "w") as config_file:
+        json.dump(app_config, config_file)
+
 def ds_nd():
     global node_socket, session_id
     app_config["active"] = False
@@ -328,7 +344,7 @@ def render_chat_ui():
     
     print(f"{color_blue}{color_bold}--- CHAT: {active_peer} ---{color_reset}")
     if wds_s:
-        print(f" Key: {wds_s}\n")
+        print(f" Key: {wds_s}\n Changes per message\n")
     print(f"{color_yellow}Commands: /b (back) | /f <path> | /check_enc{color_reset}\n")
     
     for message in message_history.get(active_peer, []):
@@ -430,8 +446,6 @@ async def listen_socket_loop():
                         await node_socket.send_packet(response_payload.encode())
                         
                         wds_s = gt_wd(chat_sessions[sender_id]["key"])
-                        system_msg = f"Chat established. Secure Key: {wds_s}"
-                        add_history_message(sender_id, "System", system_msg)
                         
                         if active_peer == sender_id and current_ui == "chat":
                             render_chat_ui()
@@ -462,8 +476,6 @@ async def listen_socket_loop():
                             chat_sessions[sender_id]["rx"] = 0
                             
                             wds_s = gt_wd(chat_sessions[sender_id]["key"])
-                            system_msg = f"Chat secured. Secure Key: {wds_s}"
-                            add_history_message(sender_id, "System", system_msg)
                             
                             if active_peer == sender_id and current_ui == "chat":
                                 render_chat_ui()
@@ -825,6 +837,7 @@ def execute_main_loop():
                             clear_screen()
                             print(f"{color_blue}--- Verify Encryption: {chosen_peer} ---{color_reset}\n")
                             print(f"       {gt_wd(chat_sessions[chosen_peer]['key'])}\n")
+                            print("Both peers must see the exact same words and colors in the exact same order.")
                             print(f"{color_red}WARNING: Auto-checks (/check_enc) can be faked by a MITM.{color_reset}")
                             print("The ONLY 100% secure way is to manually compare these words via voice or in person!\n")
                             input("Press Enter to return...")
