@@ -7,7 +7,7 @@ import asyncio
 import threading
 import hashlib
 from cryptography.hazmat.primitives.asymmetric import x25519
-from cryptography.hazmat.primitives.serialization import PublicFormat, Encoding
+from cryptography.hazmat.primitives.serialization import PublicFormat, Encoding, PrivateFormat, NoEncryption
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -34,7 +34,7 @@ cl_ls = [color_red, color_green, color_yellow, color_blue, color_magenta, color_
 
 server_source = """import asyncio, os, base64, json, secrets
 from cryptography.hazmat.primitives.asymmetric import x25519
-from cryptography.hazmat.primitives.serialization import PublicFormat, Encoding
+from cryptography.hazmat.primitives.serialization import PublicFormat, Encoding, PrivateFormat, NoEncryption
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -95,7 +95,7 @@ async def handle_connection(reader, writer, static_key):
     except:
         return writer.close()
     
-    session_id = secrets.token_hex(3).upper()
+    session_id = secrets.token_hex(8).upper()
     clients_dict[session_id] = session
     print(f"[+] Client connected: {session_id}")
     
@@ -117,7 +117,15 @@ async def handle_connection(reader, writer, static_key):
         writer.close()
 
 async def run_server():
-    static_key = x25519.X25519PrivateKey.generate()
+    key_file = "server.key"
+    if os.path.exists(key_file):
+        with open(key_file, "rb") as f:
+            static_key = x25519.X25519PrivateKey.from_private_bytes(f.read())
+    else:
+        static_key = x25519.X25519PrivateKey.generate()
+        with open(key_file, "wb") as f:
+            f.write(static_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()))
+            
     public_key_bytes = static_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     public_key_b64 = base64.b64encode(public_key_bytes).decode()
     server = await asyncio.start_server(lambda r, w: handle_connection(r, w, static_key), '0.0.0.0', 7234)
@@ -163,6 +171,51 @@ def gt_wd(k_byt):
         colr = cl_ls[c_idx]
         el_ms.append(f"{colr}{word}{color_reset}")
     return " | ".join(el_ms)
+
+def enc_r(sess, t_yp, cont):
+    tx_k = sess["tx_k"]
+    seq = sess["tx"] + 1
+    tx_k = hkdf_derive(None, tx_k, b"Ratchet")
+    sess["tx_k"] = tx_k
+    sess["tx"] = seq
+    sess["key"] = hkdf_derive(None, min(tx_k, sess["rx_k"]) + max(tx_k, sess["rx_k"]), b"Visual")
+    meta = {"t": t_yp, "s": seq}
+    if t_yp == "file":
+        meta["n"] = cont[0]
+        meta["d"] = cont[1]
+    else:
+        meta["c"] = cont
+    enc_d = encrypt_aead(tx_k, json.dumps(meta).encode())
+    return enc_d, seq
+
+def dec_r(sess, ciph, seq):
+    rx_k = sess["rx_k"]
+    rx_s = sess["rx"]
+    if seq <= rx_s:
+        if seq in sess["sk_ks"]:
+            skipped_k = sess["sk_ks"].pop(seq)
+            plain = decrypt_aead(skipped_k, ciph)
+            return plain
+        return None
+    diff = seq - rx_s
+    if diff > 100:
+        raise ConnectionError("Ratchet step limit exceeded")
+    for step in range(1, diff):
+        skipped_seq = rx_s + step
+        skipped_rx_k = hkdf_derive(None, rx_k, b"Ratchet")
+        sess["sk_ks"][skipped_seq] = skipped_rx_k
+        if len(sess["sk_ks"]) > 100:
+            oldest = min(sess["sk_ks"].keys())
+            sess["sk_ks"].pop(oldest)
+        rx_k = skipped_rx_k
+    rx_k = hkdf_derive(None, rx_k, b"Ratchet")
+    plain = decrypt_aead(rx_k, ciph)
+    if plain is not None:
+        sess["prev_key"] = sess["key"]
+        sess["rx_k"] = rx_k
+        sess["rx"] = seq
+        sess["key"] = hkdf_derive(None, min(sess["tx_k"], rx_k) + max(sess["tx_k"], rx_k), b"Visual")
+    return plain
 
 class ClientSocket:
     def __init__(self, reader, writer, access_key):
@@ -242,40 +295,6 @@ def ds_nd():
     chat_sessions.clear()
     message_history.clear()
 
-def enc_r(p_id, t_yp, cont):
-    sess = chat_sessions[p_id]
-    tx_k = sess["tx_k"]
-    seq = sess["tx"] + 1
-    tx_k = hkdf_derive(None, tx_k, b"Ratchet")
-    sess["tx_k"] = tx_k
-    sess["tx"] = seq
-    sess["key"] = hkdf_derive(None, min(tx_k, sess["rx_k"]) + max(tx_k, sess["rx_k"]), b"Visual")
-    meta = {"t": t_yp, "s": seq}
-    if t_yp == "file":
-        meta["n"] = cont[0]
-        meta["d"] = cont[1]
-    else:
-        meta["c"] = cont
-    enc_d = encrypt_aead(tx_k, json.dumps(meta).encode())
-    return enc_d, seq
-
-def dec_r(p_id, ciph, seq):
-    sess = chat_sessions[p_id]
-    rx_k = sess["rx_k"]
-    rx_s = sess["rx"]
-    if seq <= rx_s:
-        return None
-    diff = seq - rx_s
-    for _ in range(diff):
-        rx_k = hkdf_derive(None, rx_k, b"Ratchet")
-    plain = decrypt_aead(rx_k, ciph)
-    if plain is not None:
-        sess["prev_key"] = sess["key"]
-        sess["rx_k"] = rx_k
-        sess["rx"] = seq
-        sess["key"] = hkdf_derive(None, min(sess["tx_k"], rx_k) + max(sess["tx_k"], rx_k), b"Visual")
-    return plain
-
 def render_chat_ui():
     if not active_peer:
         return
@@ -283,7 +302,7 @@ def render_chat_ui():
     clear_screen()
     wds_s = gt_wd(chat_sessions[active_peer]["key"]) if active_peer in chat_sessions and chat_sessions[active_peer]["status"] == "secured" else ""
     
-    print(f"{color_blue}{color_bold}=== CHAT: {active_peer} ==={color_reset}")
+    print(f"{color_blue}{color_bold}--- CHAT: {active_peer} ---{color_reset}")
     if wds_s:
         print(f" Key: {wds_s}\n")
     print(f"{color_yellow}Commands: /b (back) | /f <path> | /check_enc{color_reset}\n")
@@ -367,19 +386,22 @@ async def listen_socket_loop():
                         
                         chat_sessions[sender_id] = {
                             "status": "secured",
-                            "priv": my_private_key,
+                            "priv": None,
                             "tx_k": tx_k,
                             "rx_k": rx_k,
                             "tx": 0,
                             "rx": 0,
                             "key": hkdf_derive(None, min(tx_k, rx_k) + max(tx_k, rx_k), b"Visual"),
-                            "prev_key": None
+                            "prev_key": None,
+                            "sk_ks": {}
                         }
                         
                         response_payload = json.dumps({"action": "send", "to": sender_id, "text": f"RESP:{my_public_b64}"})
                         await node_socket.send_packet(response_payload.encode())
                         
                         wds_s = gt_wd(chat_sessions[sender_id]["key"])
+                        system_msg = f"Chat established. Secure Key: {wds_s}"
+                        add_history_message(sender_id, "System", system_msg)
                         
                         if active_peer == sender_id and current_ui == "chat":
                             render_chat_ui()
@@ -403,11 +425,15 @@ async def listen_socket_loop():
                             chat_sessions[sender_id]["rx_k"] = rx_k
                             chat_sessions[sender_id]["key"] = hkdf_derive(None, min(tx_k, rx_k) + max(tx_k, rx_k), b"Visual")
                             chat_sessions[sender_id]["prev_key"] = None
+                            chat_sessions[sender_id]["sk_ks"] = {}
+                            chat_sessions[sender_id]["priv"] = None
                             chat_sessions[sender_id]["status"] = "secured"
                             chat_sessions[sender_id]["tx"] = 0
                             chat_sessions[sender_id]["rx"] = 0
                             
                             wds_s = gt_wd(chat_sessions[sender_id]["key"])
+                            system_msg = f"Chat secured. Secure Key: {wds_s}"
+                            add_history_message(sender_id, "System", system_msg)
                             
                             if active_peer == sender_id and current_ui == "chat":
                                 render_chat_ui()
@@ -421,7 +447,7 @@ async def listen_socket_loop():
                             cipher_payload = base64.b64decode(parts[1]) + base64.b64decode(parts[2])
                             seq = int(parts[3])
                             
-                            decrypted_message = dec_r(sender_id, cipher_payload, seq)
+                            decrypted_message = dec_r(chat_sessions[sender_id], cipher_payload, seq)
                             
                             if not decrypted_message:
                                 sys.stdout.write(f"\r\033[K{color_red}[!] CRITICAL SECURITY ALERT: E2E message decryption failed! Tampering or MITM attack detected! Instantly disconnecting...{color_reset}\n> ")
@@ -462,10 +488,10 @@ async def listen_socket_loop():
                             elif content_type == "file":
                                 b64_data = metadata["d"].split(",")[1]
                                 file_bytes = base64.b64decode(b64_data)
-                                target_path = os.path.join(download_dir, metadata["n"])
+                                target_path = os.path.join(download_dir, os.path.basename(metadata["n"]))
                                 with open(target_path, "wb") as file_handler:
                                     file_handler.write(file_bytes)
-                                content_str = f"{metadata['n']} (Saved to downloads)"
+                                content_str = f"{os.path.basename(metadata['n'])} (Saved to downloads)"
                                 is_file_flag = True
                             else:
                                 content_str = metadata["c"]
@@ -494,7 +520,14 @@ def tunnel_to_peer(peer_id):
         return
         
     ephemeral_key = x25519.X25519PrivateKey.generate()
-    chat_sessions[peer_id] = {"status": "connecting", "priv": ephemeral_key, "key": None, "tx": 0, "rx": 0}
+    chat_sessions[peer_id] = {
+        "status": "connecting",
+        "priv": ephemeral_key,
+        "key": None,
+        "tx": 0,
+        "rx": 0,
+        "sk_ks": {}
+    }
     
     public_bytes = ephemeral_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     public_b64 = base64.b64encode(public_bytes).decode()
@@ -506,7 +539,7 @@ def send_internal_cmd(peer_id, cmd_text):
     if peer_id not in chat_sessions or chat_sessions[peer_id]["status"] != "secured" or not node_socket:
         return
         
-    enc_b, seq = enc_r(peer_id, "cmd", cmd_text)
+    enc_b, seq = enc_r(chat_sessions[peer_id], "cmd", cmd_text)
     nonce_base64 = base64.b64encode(enc_b[:12]).decode()
     cipher_base64 = base64.b64encode(enc_b[12:]).decode()
     
@@ -517,7 +550,7 @@ def send_text_msg(peer_id, text_content):
     if peer_id not in chat_sessions or chat_sessions[peer_id]["status"] != "secured" or not node_socket:
         return
         
-    enc_b, seq = enc_r(peer_id, "txt", text_content)
+    enc_b, seq = enc_r(chat_sessions[peer_id], "txt", text_content)
     nonce_base64 = base64.b64encode(enc_b[:12]).decode()
     cipher_base64 = base64.b64encode(enc_b[12:]).decode()
     
@@ -534,7 +567,7 @@ def send_file_attachment(peer_id, file_path):
     with open(file_path, "rb") as file_handler:
         file_b64 = base64.b64encode(file_handler.read()).decode()
         
-    enc_b, seq = enc_r(peer_id, "file", (file_name, f"b64,{file_b64}"))
+    enc_b, seq = enc_r(chat_sessions[peer_id], "file", (file_name, f"b64,{file_b64}"))
     nonce_base64 = base64.b64encode(enc_b[:12]).decode()
     cipher_base64 = base64.b64encode(enc_b[12:]).decode()
     
@@ -545,7 +578,7 @@ def send_file_attachment(peer_id, file_path):
 
 def create_own_node():
     clear_screen()
-    print(f"{color_blue}=== CREATE OWN NODE ==={color_reset}\n")
+    print(f"{color_blue}--- CREATE OWN NODE ---{color_reset}\n")
     
     windows_script = f"""@echo off
 echo [*] Opening Firewall...
@@ -644,7 +677,7 @@ def execute_main_loop():
         
         if menu_choice == "1":
             clear_screen()
-            print(f"{color_red}{color_bold}=== SECURITY WARNING ==={color_reset}")
+            print(f"{color_red}{color_bold}--- SECURITY WARNING ---{color_reset}")
             print("Intermediate nodes route your E2E traffic. They can see:")
             print(" - Your IP address and the IP of your peer")
             print(" - Exact timestamps and sizes of all messages")
@@ -697,7 +730,7 @@ def execute_main_loop():
                 
                 if session_choice == "1":
                     peer_id_input = input("Enter PeerID: ").strip().upper()
-                    if len(peer_id_input) == 6:
+                    if len(peer_id_input) in [6, 16]:
                         tunnel_to_peer(peer_id_input)
                         active_peer = peer_id_input
                         current_ui = "chat"
