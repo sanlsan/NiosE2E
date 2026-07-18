@@ -6,6 +6,9 @@ import base64
 import asyncio
 import threading
 import hashlib
+import re
+import secrets
+import gc
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import PublicFormat, Encoding, PrivateFormat, NoEncryption
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -138,6 +141,29 @@ if __name__ == '__main__':
 
 server_b64 = base64.b64encode(server_source.encode()).decode()
 
+def dbg_ck():
+    if sys.gettrace() is not None:
+        return True
+    try:
+        import ctypes
+        if os.name == 'nt' and ctypes.windll.kernel32.IsDebuggerPresent():
+            return True
+    except:
+        pass
+    try:
+        if os.name == 'posix' and os.path.exists('/proc/self/status'):
+            with open('/proc/self/status', 'r') as f:
+                for line in f:
+                    if line.startswith("TracerPid:") and int(line.split()[1]) != 0:
+                        return True
+    except:
+        pass
+    return False
+
+def secure_exit():
+    ds_nd()
+    sys.exit(0)
+
 def hkdf_derive(salt_bytes, material_bytes, info_bytes):
     return HKDF(SHA256(), 32, salt_bytes, info_bytes).derive(material_bytes)
 
@@ -157,16 +183,11 @@ def gt_wd(k_byt):
         return ""
     dg_by = hashlib.sha256(k_byt).digest()
     w_lst = [
-        "sigma", "chad", "giga", "rizz", "gyatt", "mewing", "skibidi", "ohio", "cringe", "based",
-        "cope", "seethe", "mald", "yeet", "bruh", "pog", "poggers", "sus", "amogus", "stonks",
-        "fomo", "hodl", "doge", "pepe", "wojak", "troll", "noob", "pwned", "rekt", "oof",
-        "skillissue", "gitgud", "chungus", "harambe", "shrek", "sponge", "squidward", "fr", "nocap", "mid",
-        "valid", "sheesh", "bussin", "glazing", "cook", "boomer", "zoomer", "doomer", "coomer", "heisenberg",
-        "walter", "saul", "kek", "lol", "lmao", "rofl", "kappa", "pepega", "monkas", "lurk",
-        "ratio", "canceled", "simp", "incel", "femcel", "goofy", "augh", "npc", "gigachad", "grindset",
-        "alpha", "beta", "omega", "rizzler", "woke", "redpill", "bluepill", "blackpill", "doggo", "unhinged",
-        "delulu", "solulu", "pookie", "bestie", "slay", "ate", "banger", "boujee", "skrt", "cap",
-        "fam", "lit", "fire", "gucci", "salty", "shook", "tea", "shade", "flex", "clout"
+        "acid", "apex", "band", "bark", "beta", "bolt", "born", "calm", "clay", "coal",
+        "dark", "dawn", "echo", "edge", "envy", "fade", "film", "flow", "flux", "glow",
+        "grid", "hawk", "haze", "hint", "icon", "iron", "jade", "jolt", "kept", "lava",
+        "leaf", "limo", "maze", "mist", "neon", "node", "opal", "open", "path", "pave",
+        "rift", "rust", "sand", "silk", "spark", "tide", "toad", "volt", "wave", "zinc"
     ]
     el_ms = []
     for idx in range(4):
@@ -178,6 +199,8 @@ def gt_wd(k_byt):
     return " | ".join(el_ms)
 
 def enc_r(sess, t_yp, cont):
+    if dbg_ck():
+        secure_exit()
     tx_k = sess["tx_k"]
     seq = sess["tx"] + 1
     tx_k = hkdf_derive(None, tx_k, b"Ratchet")
@@ -190,36 +213,46 @@ def enc_r(sess, t_yp, cont):
         meta["d"] = cont[1]
     else:
         meta["c"] = cont
+    pad_len = secrets.randbelow(113) + 16
+    meta["p"] = secrets.token_hex(pad_len // 2)
     enc_d = encrypt_aead(tx_k, json.dumps(meta).encode())
+    gc.collect()
     return enc_d, seq
 
 def dec_r(sess, ciph, seq):
+    if dbg_ck():
+        secure_exit()
     rx_k = sess["rx_k"]
     rx_s = sess["rx"]
     if seq <= rx_s:
         if seq in sess["sk_ks"]:
             skipped_k = sess["sk_ks"].pop(seq)
             plain = decrypt_aead(skipped_k, ciph)
+            gc.collect()
             return plain
         return None
     diff = seq - rx_s
     if diff > 100:
         raise ConnectionError("Ratchet step limit exceeded")
+    temp_sk_ks = sess["sk_ks"].copy()
+    temp_rx_k = rx_k
     for step in range(1, diff):
         skipped_seq = rx_s + step
-        skipped_rx_k = hkdf_derive(None, rx_k, b"Ratchet")
-        sess["sk_ks"][skipped_seq] = skipped_rx_k
-        if len(sess["sk_ks"]) > 100:
-            oldest = min(sess["sk_ks"].keys())
-            sess["sk_ks"].pop(oldest)
-        rx_k = skipped_rx_k
-    rx_k = hkdf_derive(None, rx_k, b"Ratchet")
-    plain = decrypt_aead(rx_k, ciph)
+        skipped_rx_k = hkdf_derive(None, temp_rx_k, b"Ratchet")
+        temp_sk_ks[skipped_seq] = skipped_rx_k
+        if len(temp_sk_ks) > 100:
+            oldest = min(temp_sk_ks.keys())
+            temp_sk_ks.pop(oldest)
+        temp_rx_k = skipped_rx_k
+    target_rx_k = hkdf_derive(None, temp_rx_k, b"Ratchet")
+    plain = decrypt_aead(target_rx_k, ciph)
     if plain is not None:
+        sess["sk_ks"] = temp_sk_ks
         sess["prev_key"] = sess["key"]
-        sess["rx_k"] = rx_k
+        sess["rx_k"] = target_rx_k
         sess["rx"] = seq
-        sess["key"] = hkdf_derive(None, min(sess["tx_k"], rx_k) + max(sess["tx_k"], rx_k), b"Visual")
+        sess["key"] = hkdf_derive(None, min(sess["tx_k"], target_rx_k) + max(sess["tx_k"], target_rx_k), b"Visual")
+    gc.collect()
     return plain
 
 class ClientSocket:
@@ -247,6 +280,7 @@ class ClientSocket:
         ephemeral_public_key = x25519.X25519PublicKey.from_public_bytes(decrypted_bytes)
         shared_key2 = self.private_key.exchange(ephemeral_public_key)
         self.session_key = hkdf_derive(None, shared_key1 + shared_key2, b"NiosSocket")
+        gc.collect()
 
     async def send_packet(self, data_payload):
         encrypted_payload = encrypt_aead(self.session_key, data_payload)
@@ -271,22 +305,6 @@ message_history = {}
 current_ui = "main"
 app_config = {"host": None, "port": None, "key": None, "active": False}
 
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-def load_config():
-    global app_config
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r") as config_file:
-                app_config = json.load(config_file)
-        except:
-            pass
-
-def save_config():
-    with open(config_path, "w") as config_file:
-        json.dump(app_config, config_file)
-
 def ds_nd():
     global node_socket, session_id
     app_config["active"] = False
@@ -299,6 +317,7 @@ def ds_nd():
     session_id = None
     chat_sessions.clear()
     message_history.clear()
+    gc.collect()
 
 def render_chat_ui():
     if not active_peer:
@@ -310,7 +329,6 @@ def render_chat_ui():
     print(f"{color_blue}{color_bold}--- CHAT: {active_peer} ---{color_reset}")
     if wds_s:
         print(f" Key: {wds_s}\n")
-        print(f"{color_yellow}Key changes with per message{color_reset}\n")
     print(f"{color_yellow}Commands: /b (back) | /f <path> | /check_enc{color_reset}\n")
     
     for message in message_history.get(active_peer, []):
@@ -342,6 +360,9 @@ async def listen_socket_loop():
     global node_socket, session_id, chat_sessions, message_history
     
     while True:
+        if dbg_ck():
+            secure_exit()
+            
         if not app_config.get("active"):
             if node_socket:
                 try:
@@ -360,6 +381,9 @@ async def listen_socket_loop():
             node_socket = socket_session
             
             while app_config.get("active"):
+                if dbg_ck():
+                    secure_exit()
+                    
                 packet_bytes = await node_socket.receive_packet()
                 if not packet_bytes:
                     break
@@ -406,6 +430,8 @@ async def listen_socket_loop():
                         await node_socket.send_packet(response_payload.encode())
                         
                         wds_s = gt_wd(chat_sessions[sender_id]["key"])
+                        system_msg = f"Chat established. Secure Key: {wds_s}"
+                        add_history_message(sender_id, "System", system_msg)
                         
                         if active_peer == sender_id and current_ui == "chat":
                             render_chat_ui()
@@ -436,6 +462,8 @@ async def listen_socket_loop():
                             chat_sessions[sender_id]["rx"] = 0
                             
                             wds_s = gt_wd(chat_sessions[sender_id]["key"])
+                            system_msg = f"Chat secured. Secure Key: {wds_s}"
+                            add_history_message(sender_id, "System", system_msg)
                             
                             if active_peer == sender_id and current_ui == "chat":
                                 render_chat_ui()
@@ -472,8 +500,7 @@ async def listen_socket_loop():
                                         render_chat_ui()
                                     
                                 elif command_ctx in ["OK", "ERR"]:
-                                    alert_text = "[+] Auto-check OK! Compare words manually." if command_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
-                                    alert_color = color_green if command_ctx == "OK" else color_red
+                                    alert_text = "[+] Auto-check OK! WARNING: This check is in-band and can be simulated by an active MITM! Always compare words manually!" if command_ctx == "OK" else "[!] DANGER! Encryption mismatch! MITM possible!"
                                     add_history_message(sender_id, "System", alert_text)
                                     
                                     if command_ctx == "ERR":
@@ -490,10 +517,12 @@ async def listen_socket_loop():
                             elif content_type == "file":
                                 b64_data = metadata["d"].split(",")[1]
                                 file_bytes = base64.b64decode(b64_data)
-                                target_path = os.path.join(download_dir, os.path.basename(metadata["n"]))
+                                raw_filename = os.path.basename(metadata["n"].replace('\\', '/'))
+                                safe_filename = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', raw_filename)
+                                target_path = os.path.join(download_dir, safe_filename)
                                 with open(target_path, "wb") as file_handler:
                                     file_handler.write(file_bytes)
-                                content_str = f"{os.path.basename(metadata['n'])} (Saved to downloads)"
+                                content_str = f"{safe_filename} (Saved to downloads)"
                                 is_file_flag = True
                             else:
                                 content_str = metadata["c"]
@@ -642,6 +671,8 @@ def handle_chat_input():
         
     if user_input == "/check_enc":
         add_history_message(active_peer, "System", "[*] Initiating auto-check...")
+        add_history_message(active_peer, "System", "WARNING: This auto-check is in-band and can be simulated by an active MITM!")
+        add_history_message(active_peer, "System", "Always manually compare the words below via an out-of-band channel!")
         render_chat_ui()
         my_hash = base64.b64encode(hashlib.sha256(chat_sessions[active_peer]["key"]).digest()[:4]).decode()
         send_internal_cmd(active_peer, f"CHK:{my_hash}")
@@ -664,6 +695,9 @@ def execute_main_loop():
     load_config()
     
     while True:
+        if dbg_ck():
+            secure_exit()
+            
         current_ui = "main"
         clear_screen()
         print(f"{color_blue}{color_bold}--- e2e manager ---{color_reset}")
@@ -714,6 +748,9 @@ def execute_main_loop():
                 continue
                 
             while app_config["active"]:
+                if dbg_ck():
+                    secure_exit()
+                    
                 if active_peer:
                     current_ui = "chat"
                     time.sleep(0.5)
@@ -788,8 +825,8 @@ def execute_main_loop():
                             clear_screen()
                             print(f"{color_blue}--- Verify Encryption: {chosen_peer} ---{color_reset}\n")
                             print(f"       {gt_wd(chat_sessions[chosen_peer]['key'])}\n")
-                            print("Both peers must see the exact same words and colors in the exact same order.")
-                            print("If they differ, your connection is compromised (MITM).\n")
+                            print(f"{color_red}WARNING: Auto-checks (/check_enc) can be faked by a MITM.{color_reset}")
+                            print("The ONLY 100% secure way is to manually compare these words via voice or in person!\n")
                             input("Press Enter to return...")
                             
                 elif session_choice == "4":
