@@ -406,8 +406,6 @@ async def listen_socket_loop():
                         await node_socket.send_packet(response_payload.encode())
                         
                         wds_s = gt_wd(chat_sessions[sender_id]["key"])
-                        system_msg = f"Chat established. Secure Key: {wds_s}"
-                        add_history_message(sender_id, "System", system_msg)
                         
                         if active_peer == sender_id and current_ui == "chat":
                             render_chat_ui()
@@ -438,8 +436,6 @@ async def listen_socket_loop():
                             chat_sessions[sender_id]["rx"] = 0
                             
                             wds_s = gt_wd(chat_sessions[sender_id]["key"])
-                            system_msg = f"Chat secured. Secure Key: {wds_s}"
-                            add_history_message(sender_id, "System", system_msg)
                             
                             if active_peer == sender_id and current_ui == "chat":
                                 render_chat_ui()
