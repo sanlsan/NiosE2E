@@ -1,5 +1,5 @@
 @echo off
-title NiosE2E Launcher
+title NiosE2E fast
 
 set URL=https://raw.githubusercontent.com/sanlsan/NiosE2E/main/client.py
 set FILE=client.py
