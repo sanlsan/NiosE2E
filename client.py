@@ -262,9 +262,6 @@ def encrypt(session, typ_val, content):
     hdr_byt = base64.b64decode(hdr_b64)
     enc_dat = enc_aed(msg_key, json.dumps(metadat).encode(), hdr_byt)
     
-    chn_ks1 = session.get("chn_ksx") or b""
-    chn_ks2 = session.get("chn_krx") or b""
-    session["key_val"] = hkdf_dr(None, min(chn_ks1, chn_ks2) + max(chn_ks1, chn_ks2), b"Visual")
     gc.collect()
     return hdr_b64, enc_dat
 
@@ -305,10 +302,6 @@ def decrypt(session, hdr_b64, ciph_dt):
         if pla_txt is not None:
             for key_var in tmp_ses:
                 session[key_var] = tmp_ses[key_var]
-            session["prv_key"] = session["key_val"]
-            chn_ks1 = session.get("chn_ksx") or b""
-            chn_ks2 = session.get("chn_krx") or b""
-            session["key_val"] = hkdf_dr(None, min(chn_ks1, chn_ks2) + max(chn_ks1, chn_ks2), b"Visual")
             gc.collect()
             return pla_txt
         return None
@@ -621,7 +614,7 @@ async def socklop():
                                 "num_rcv": 0,
                                 "prv_num": 0,
                                 "skip_ks": {},
-                                "key_val": hkdf_dr(None, min(chn_ksx, chn_krx) + max(chn_ksx, chn_krx), b"Visual"),
+                                "key_val": hkdf_dr(None, sh_key1, b"Visual"),
                                 "prv_key": None,
                                 "peer_static_ed": pub_ed_b64
                             }
@@ -687,7 +680,7 @@ async def socklop():
                                     "num_rcv": 0,
                                     "prv_num": 0,
                                     "skip_ks": {},
-                                    "key_val": hkdf_dr(None, min(chn_ksx, b"") + max(chn_ksx, b""), b"Visual"),
+                                    "key_val": hkdf_dr(None, sh_key1, b"Visual"),
                                     "prv_key": None,
                                     "peer_static_ed": pub_ed_b64
                                 }
@@ -723,7 +716,7 @@ async def socklop():
                                     cmd_ctx = metadat["c"]
                                     if cmd_ctx.startswith("CHK:"):
                                         p_hashx = cmd_ctx[4:]
-                                        chk_key = chats_s[send_id].get("prv_key") or chats_s[send_id]["key_val"]
+                                        chk_key = chats_s[send_id]["key_val"]
                                         m_hashx = base64.b64encode(hashlib.sha256(chk_key).digest()[:4]).decode()
                                         vrf_res = "OK" if p_hashx == m_hashx else "ERR"
                                         snd_cmd(send_id, vrf_res)
