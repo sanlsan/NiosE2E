@@ -212,7 +212,7 @@ def get_wrd(key_byt):
         "rift", "rust", "sand", "silk", "spark", "tide", "toad", "volt", "wave", "zinc"
     ]
     elem_ls = []
-    for idx_val in range(4):
+    for idx_val in range(8):
         wrd_idx = dig_byt[idx_val * 2] % 50
         clr_idx = dig_byt[idx_val * 2 + 1] % len(color_l)
         word_st = wrd_lst[wrd_idx]
@@ -614,7 +614,7 @@ async def socklop():
                                 "num_rcv": 0,
                                 "prv_num": 0,
                                 "skip_ks": {},
-                                "key_val": hkdf_dr(None, sh_key1, b"Visual"),
+                                "key_val": hashlib.sha256(b"".join(sorted([my_ed_pub, pub_ed_byts]))).digest(),
                                 "prv_key": None,
                                 "peer_static_ed": pub_ed_b64
                             }
@@ -680,7 +680,7 @@ async def socklop():
                                     "num_rcv": 0,
                                     "prv_num": 0,
                                     "skip_ks": {},
-                                    "key_val": hkdf_dr(None, sh_key1, b"Visual"),
+                                    "key_val": hashlib.sha256(b"".join(sorted([my_ed_pub, pub_ed_byts]))).digest(),
                                     "prv_key": None,
                                     "peer_static_ed": pub_ed_b64
                                 }
@@ -1113,7 +1113,7 @@ def mainlop():
                             print(f"  {sess_formatted}\n")
                             
                             print(f"{clr_red}INSTRUCTION FOR PARANOIDS:{clr_rst}")
-                            print("1. Match the sequence of 4 words and colors. They must be identical.")
+                            print("1. Match the sequence of 8 words and colors. They must be identical.")
                             print("2. Compare the peer's Fingerprint with their actual key via a trusted channel.")
                             print("3. Any mismatch means the server or network is compromised (MITM).")
                             print("4. If everything matches, type /verify inside the chat with the peer.\n")
